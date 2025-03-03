@@ -11,90 +11,127 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.tooling.preview.Preview
 import com.example.fetchcodingexercise.ui.theme.FetchCodingExerciseTheme
-import androidx.compose.foundation.layout.* // for layout components (Column, Row, Box, Spacer) to structure UI
-import androidx.compose.foundation.lazy.LazyColumn // used to render only visible items
-import androidx.compose.foundation.lazy.items // display list of items in a lazycolumn
-// material design 3 theming elements to create UI
+// Import layout components for structuring UI
+import androidx.compose.foundation.layout.*
+// LazyColumn is Android's equivalent to RecyclerView in Jetpack Compose
+import androidx.compose.foundation.lazy.LazyColumn
+// Helper function for displaying lists in LazyColumn
+import androidx.compose.foundation.lazy.items
+// Material Design 3 UI components
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.runtime.* // state management tools
-// used for styling text
+// State management tools for Compose
+import androidx.compose.runtime.*
+// Text styling utilities
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-// for work on background threads
+// Coroutine dispatchers for background work
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-// for network requests and JSON parsing
+// Libraries for network requests and JSON parsing
 import org.json.JSONArray
 import java.net.URL
 
-// data class used to represent each item we parse from the JSON
+/**
+ * Data class representing an item from the API response.
+ * @param id Unique identifier for the item
+ * @param listId Group identifier that items can be categorized by
+ * @param name The display name of the item
+ */
 data class Item(val id: Int, val listId: Int, val name: String)
 
+/**
+ * Main entry point for the application.
+ * Sets up the theme and initial UI container.
+ */
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
+            // Apply the application theme
             FetchCodingExerciseTheme {
-                // A surface container using the 'background' color from the theme
+                // Surface container provides background color from theme
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
+                    // Start with the main screen composable
                     ItemListScreen()
                 }
             }
         }
     }
 }
-// function to get items from api, must be called within a coroutine since it's suspend
+
+/**
+ * Fetches items from the remote API and processes them.
+ * This is a suspending function that should be called from a coroutine.
+ *
+ * @return A map of items grouped by their listId
+ */
 suspend fun fetchItemsFromApi(): Map<Int, List<Item>> = withContext(Dispatchers.IO) {
-    // runs on IO dispatcher to run calls on background thread
-    // read the response from the URL as a string
-    val jsonString = URL("https://fetch-hiring.s3.amazonaws.com/hiring.json").readText()
-    // parse the string into a JSON array
-    val jsonArray = JSONArray(jsonString)
+    // Use IO dispatcher to perform network operations on a background thread
+    try {
+        // Fetch JSON data from the remote URL
+        val jsonString = URL("https://fetch-hiring.s3.amazonaws.com/hiring.json").readText()
 
-    // make a list of individual items that we get out of the json
-    val items = mutableListOf<Item>()
-    // iterate through all json objefts
-    for(i in 0 until jsonArray.length()) {
-        // extract first object, parse it into id, listID, name
-        val obj = jsonArray.getJSONObject(i)
-        val id = obj.getInt("id")
-        val listId = obj.getInt("listId")
-        val name = if (obj.isNull("name")) null else obj.getString("name")
+        // Parse the JSON string into a JSONArray
+        val jsonArray = JSONArray(jsonString)
 
-        if(!name.isNullOrBlank()) {
-            items.add(Item(id, listId, name))
-        }
-    }
+        // Create a list to store the parsed items
+        val items = mutableListOf<Item>()
 
-    //sort items by listID and then name
-    val itemsSorted = items.sortedWith(
-        // first sort by the listID in ascending order
-        compareBy<Item> {it.listId}
-            .thenBy {
-                // secondly, sort by the number next to the item name, converting it to int and comparing
-                it.name.replace("Item ", "").toIntOrNull() ?:it.name
+        // Iterate through each JSON object in the array
+        for(i in 0 until jsonArray.length()) {
+            // Extract and parse each JSON object
+            val obj = jsonArray.getJSONObject(i)
+            val id = obj.getInt("id")
+            val listId = obj.getInt("listId")
+            // Handle null values in the name field
+            val name = if (obj.isNull("name")) null else obj.getString("name")
+
+            // Only add items with non-null, non-blank names
+            if(!name.isNullOrBlank()) {
+                items.add(Item(id, listId, name))
             }
-    )
-    //groups into map with listID as the key, then the item as the value
-    return@withContext itemsSorted.groupBy { it.listId }
+        }
+
+        // Sort the items first by listId and then by the numeric portion of the name
+        val itemsSorted = items.sortedWith(
+            // Primary sort by listId in ascending order
+            compareBy<Item> { it.listId }
+                .thenBy {
+                    // Secondary sort by extracting the number from "Item X" format
+                    // If extraction fails, fall back to string comparison
+                    it.name.replace("Item ", "").toIntOrNull() ?: it.name
+                }
+        )
+
+        // Group the sorted items by listId and return the map
+        return@withContext itemsSorted.groupBy { it.listId }
+    } catch (e: Exception) {
+        // Propagate any exceptions to the caller
+        throw e
+    }
 }
 
-//groups items by listId, displaying using a LazyColumn
+/**
+ * Composable function that displays items grouped by their listId.
+ *
+ * @param groupedItems Map of items grouped by listId
+ */
 @Composable
 fun ItemGroups(groupedItems: Map<Int, List<Item>>) {
+    // LazyColumn is similar to RecyclerView, only rendering visible items
     LazyColumn {
-        // For each listId (sorted)
+        // For each listId (sorted in ascending order)
         groupedItems.keys.sorted().forEach { listId ->
-            // Header for the group
+            // Add a header for each group
             item {
                 Text(
-                    // display the list id as the title, in bold
+                    // Display the list ID as the group title
                     text = "List ID: $listId",
                     fontWeight = FontWeight.Bold,
                     fontSize = 18.sp,
@@ -103,20 +140,21 @@ fun ItemGroups(groupedItems: Map<Int, List<Item>>) {
                 )
             }
 
-            // Items in this group
+            // Render all items for the current listId
             items(groupedItems[listId] ?: emptyList()) { item ->
-                // display each item in a Card with padding
+                // Display each item in a Card with elevation for depth
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(vertical = 4.dp),
                     elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
                 ) {
+                    // Column layout for the card content
                     Column(modifier = Modifier.padding(16.dp)) {
-                        // name with medium font weight
+                        // Item name with medium emphasis
                         Text(text = item.name, fontWeight = FontWeight.Medium)
+                        // Item ID with less emphasis (smaller, dimmed text)
                         Text(
-                            // id with smaller font, dimmed color
                             text = "ID: ${item.id}",
                             fontSize = 14.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -125,31 +163,47 @@ fun ItemGroups(groupedItems: Map<Int, List<Item>>) {
                 }
             }
 
-            // Add some vertical space between groups
+            // Add vertical spacing between groups for better readability
             item { Spacer(modifier = Modifier.height(16.dp)) }
         }
     }
 }
 
+/**
+ * Main screen composable that manages state and displays the UI.
+ * Handles loading, error states, and successful data display.
+ */
 @Composable
 fun ItemListScreen() {
+    // State management for the screen
+    // Store the grouped items (empty map initially)
     var groupedItems by remember { mutableStateOf<Map<Int, List<Item>>>(emptyMap()) }
+    // Track loading state (start with loading)
     var isLoading by remember { mutableStateOf(true) }
+    // Store any error messages (null initially)
     var errorMessage by remember { mutableStateOf<String?>(null) }
 
-    // Fetch data when the composable is first composed
+    // LaunchedEffect runs once when the composable is first displayed
+    // The key1 = true parameter means it only runs once
     LaunchedEffect(key1 = true) {
         try {
+            // Attempt to fetch and process the data
             val items = fetchItemsFromApi()
+            // Update state with the fetched items
             groupedItems = items
+            // Set loading state to false
             isLoading = false
         } catch (e: Exception) {
+            // Handle any errors by updating the error message
             errorMessage = "Error: ${e.message}"
+            // Set loading state to false even on error
             isLoading = false
         }
     }
 
+    // Main layout column for the screen
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+        // App title/header
         Text(
             text = "Fetch Rewards Items",
             fontSize = 24.sp,
@@ -157,19 +211,22 @@ fun ItemListScreen() {
             modifier = Modifier.padding(bottom = 16.dp)
         )
 
+        // Conditional display based on the current state
         when {
+            // Display loading indicator when loading
             isLoading -> {
                 Box(modifier = Modifier.fillMaxSize()) {
                     CircularProgressIndicator(modifier = Modifier.align(androidx.compose.ui.Alignment.Center))
                 }
             }
+            // Display error message when there's an error
             errorMessage != null -> {
                 Text(text = errorMessage ?: "Unknown error", color = MaterialTheme.colorScheme.error)
             }
+            // Display the grouped items when data is loaded successfully
             else -> {
                 ItemGroups(groupedItems = groupedItems)
             }
         }
     }
 }
-
